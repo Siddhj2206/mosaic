@@ -140,6 +140,28 @@ impl MosaicDb {
             })
     }
 
+    pub fn get_ipo_by_source(&self, source: &str, company_name: &str) -> Result<Option<Ipo>, DbError> {
+        self.reader
+            .query_row(
+                "SELECT id, market_id, company_name, symbol, exchange, sector, offer_type,
+                 price_band_low, price_band_high, final_price, lot_size, shares_offered,
+                 fresh_issue_shares, ofs_shares, shares_outstanding_post, issue_size,
+                 open_date, close_date, allotment_date, listing_date, status,
+                 drhp_url, rhp_url, source, ingested_at, updated_at
+                 FROM ipos WHERE source=?1 AND company_name=?2",
+                params![source, company_name],
+                Self::row_to_ipo,
+            )
+            .map(Some)
+            .or_else(|e| {
+                if e == rusqlite::Error::QueryReturnedNoRows {
+                    Ok(None)
+                } else {
+                    Err(DbError::from(e))
+                }
+            })
+    }
+
     pub fn list_ipos(&self, status_filter: Option<&str>) -> Result<Vec<Ipo>, DbError> {
         let (sql, filter_params): (&str, Vec<Box<dyn rusqlite::types::ToSql>>) =
             if let Some(f) = status_filter {
@@ -376,6 +398,14 @@ impl MosaicDb {
             params![now, status, records_written, notes, id],
         )?;
         Ok(())
+    }
+
+    pub fn wal_checkpoint(&self) -> Result<(), DbError> {
+        self.writer
+            .lock()
+            .unwrap()
+            .execute_batch("PRAGMA wal_checkpoint(TRUNCATE);")
+            .map_err(DbError::from)
     }
 
     // ── Row parsers ──

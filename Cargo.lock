@@ -3949,9 +3949,11 @@ version = "0.1.0"
 dependencies = [
  "anyhow",
  "clap",
+ "dirs 6.0.0",
  "env_logger",
  "gpui",
  "gpui-component",
+ "log",
  "mosaic-core",
  "mosaic-scrapers",
 ]

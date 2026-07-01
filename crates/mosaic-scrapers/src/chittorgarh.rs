@@ -1,5 +1,6 @@
 use std::cell::RefCell;
 use std::collections::HashMap;
+use std::time::Duration;
 
 use mosaic_core::scraper::{IpoScraper, ScrapeError};
 use mosaic_core::types::{Date, DateTime, Ipo, IpoStatus, PricePoint, SubscriptionEntry};
@@ -12,18 +13,24 @@ const DASHBOARD_PATH: &str = "/ipo/ipo_dashboard.asp";
 pub struct ChittorgarhScraper {
     client: reqwest::blocking::Client,
     detail_cache: RefCell<HashMap<String, (String, String)>>,
+    request_delay: Duration,
 }
 
 impl ChittorgarhScraper {
     pub fn new() -> Self {
+        Self::with_delay(Duration::from_secs(2))
+    }
+
+    pub fn with_delay(delay: Duration) -> Self {
         let client = reqwest::blocking::Client::builder()
             .user_agent("Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36")
-            .timeout(std::time::Duration::from_secs(30))
+            .timeout(Duration::from_secs(30))
             .build()
             .expect("Failed to build HTTP client");
         Self {
             client,
             detail_cache: RefCell::new(HashMap::new()),
+            request_delay: delay,
         }
     }
 
@@ -455,6 +462,7 @@ impl IpoScraper for ChittorgarhScraper {
             log::info!("Fetching IPO detail: {}", summary.company_name);
 
             let html = self.fetch_html(&url)?;
+            std::thread::sleep(self.request_delay);
             self.detail_cache
                 .borrow_mut()
                 .insert(summary.company_name.clone(), (html.clone(), url.clone()));
