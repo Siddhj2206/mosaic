@@ -1,6 +1,25 @@
+[workspace]
+members = ["crates/mosaic-core", "crates/mosaic-scrapers"]
+resolver = "2"
+
 [package]
 name = "mosaic"
 version = "0.1.0"
 edition = "2024"
 
+[[bin]]
+name = "mosaic"
+path = "src/main.rs"
+
+[[bin]]
+name = "mosaic-cli"
+path = "src/bin/cli.rs"
+
 [dependencies]
+anyhow = "1.0.103"
+clap = { version = "4.6.1", features = ["derive"] }
+env_logger = "0.11.11"
+gpui = "0.2.2"
+gpui-component = "0.5.1"
+mosaic-core = { version = "0.1.0", path = "crates/mosaic-core" }
+mosaic-scrapers = { version = "0.1.0", path = "crates/mosaic-scrapers" }

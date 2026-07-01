@@ -276,40 +276,47 @@ struct MosaicApp {
 ### Data flow
 
 ```
-                    ┌─────────────────────┐
-                    │  mosaic (GUI app)    │
-                    │                     │
-                    │  [Refresh] button   │
-                    │  → bg_executor      │
-                    │  → scraper writes   │
-                    │  → channel signal   │
-                    │  → re-query + notify│
-                    └────────┬────────────┘
+                    ┌─────────────────────────┐
+                    │  mosaic (GUI app)        │
+                    │                          │
+                    │  background sync loop    │
+                    │  → bg_executor           │
+                    │  → mosaic-scrapers       │
+                    │  → db_writer writes      │
+                    │  → re-query + notify     │
+                    └────────┬─────────────────┘
                              │ reads/writes
-┌──────────────┐       ┌────▼────┐       ┌─────────────────┐
-│  mosaic-cli  │──────►│ SQLite  │◄──────│  mosaic(GUI)    │
-│  (headless)  │writes │ DB      │reads   │  (UI thread)    │
-└──────────────┘       │ WAL mode│       └─────────────────┘
+┌──────────────┐       ┌────▼────┐
+│  mosaic-cli  │──────►│ SQLite  │
+│  (headless)  │writes │ DB      │
+└──────────────┘       │ WAL mode│
                        └─────────┘
                       ~/.local/share/mosaic/mosaic.db
 ```
 
-Most users never touch the CLI. The GUI app has a Refresh button that spawns scrapers in the background (`cx.background_executor().spawn()`). The scraper opens its own `MosaicDb` connection, writes data, then signals the UI thread via a channel. The UI re-queries the DB and calls `cx.notify()`.
+The GUI app runs a background sync loop (see §7) that calls scrapers from `mosaic-scrapers` via `cx.background_executor().spawn()`, writes data through the writer connection, then re-queries from the reader connection and calls `cx.notify()`.
 
-`mosaic-cli` exists for debugging, cron jobs, and CI — it calls the exact same `mosaic-core` scraper library synchronously.
+`mosaic-cli` exists for debugging, cron jobs, and CI — it calls scrapers synchronously through the same library API.
 
-### Source-file map (root `mosaic` crate)
+### Source-file map
 
-| File | Role |
-|------|------|
-| `src/main.rs` | App entry: `Application::new().run()`, `gpui_component::init()`, window creation |
-| `src/bin/cli.rs` | CLI entry: `clap` subcommands → calls `mosaic-core` scrapers synchronously. Produces `mosaic-cli` binary. |
-| `src/app.rs` | `MosaicApp` entity — root `Render`, state, event routing, background scraper orchestration |
-| `src/sidebar.rs` | Icon sidebar construction (5 items, collapsible) |
-| `src/ipo_list.rs` | `IpoDelegate` + filtered `DataTable` + pill filter bar |
-| `src/ipo_detail.rs` | Structured field grid for the selected IPO |
-| `src/subscription.rs` | Grouped bar chart + subscription `DataTable` |
-| `src/performance.rs` | Line chart (with reference line) + price `DataTable` |
+| File | Crate | Role |
+|------|-------|------|
+| `src/main.rs` | mosaic | App entry: `Application::new().run()`, `gpui_component::init()`, window creation |
+| `src/bin/cli.rs` | mosaic | CLI entry: `clap` subcommands → calls `mosaic-core` scrapers synchronously. Produces `mosaic-cli` binary. |
+| `src/app.rs` | mosaic | `MosaicApp` entity — root `Render`, state, event routing, background scraper orchestration |
+| `src/sidebar.rs` | mosaic | Icon sidebar construction (5 items, collapsible) |
+| `src/ipo_list.rs` | mosaic | `IpoDelegate` + filtered `DataTable` + pill filter bar |
+| `src/ipo_detail.rs` | mosaic | Structured field grid for the selected IPO |
+| `src/subscription.rs` | mosaic | Grouped bar chart + subscription `DataTable` |
+| `src/performance.rs` | mosaic | Line chart (with reference line) + price `DataTable` |
+| `crates/mosaic-core/src/lib.rs` | mosaic-core | Re-exports |
+| `crates/mosaic-core/src/types.rs` | mosaic-core | `Ipo`, `SubscriptionEntry`, `Market`, `PricePoint`, enums |
+| `crates/mosaic-core/src/db.rs` | mosaic-core | `MosaicDb` — WAL, migrations, CRUD, KVP store |
+| `crates/mosaic-core/src/config.rs` | mosaic-core | `Config::load()` / `Config::save()` |
+| `crates/mosaic-core/src/scraper.rs` | mosaic-core | `IpoScraper` trait (no implementations) |
+| `crates/mosaic-scrapers/src/lib.rs` | mosaic-scrapers | Re-exports |
+| `crates/mosaic-scrapers/src/chittorgarh.rs` | mosaic-scrapers | `ChittorgarhScraper` impl |
 
 ---
 
@@ -338,37 +345,40 @@ Originally considered splitting ingestion (Python) from the app (Rust) to lean o
 
 ### Project structure
 
-Single Cargo workspace, two crates with two binaries in the root:
+Cargo workspace with three crates:
 
 ```
-mosaic/                        ← workspace root + root package
-├── Cargo.toml                 ← workspace + root crate with two [[bin]] entries
-├── src/
-│   ├── main.rs                [bin: mosaic]      — GPUI desktop app
-│   ├── bin/cli.rs             [bin: mosaic-cli]  — CLI (debug/automation)
+mosaic/
+├── Cargo.toml                  ← workspace manifest (no package)
+├── src/                        ← root crate: [[bin]] mosaic + [[bin]] mosaic-cli
+│   ├── main.rs                 [bin: mosaic]     — GPUI desktop app
+│   ├── bin/cli.rs              [bin: mosaic-cli] — CLI (debug/automation)
 │   ├── settings/
-│   │   └── default.toml       ← bundled default config
-│   ├── app.rs, sidebar.rs, ...                   — UI modules
+│   │   └── default.toml        ← bundled default config
+│   └── app.rs, sidebar.rs, ...                   — UI modules
 ├── crates/
-│   ├── mosaic-core/                               — shared library
+│   ├── mosaic-core/            ← shared types, DB, config, scraper trait
 │   │   ├── Cargo.toml
 │   │   └── src/
 │   │       ├── lib.rs          ← re-exports
 │   │       ├── types.rs        ← Ipo, SubscriptionEntry, Market, etc.
 │   │       ├── db.rs           ← MosaicDb (WAL, CRUD, migrations, KVP store)
 │   │       ├── config.rs       ← Config struct (deserialized from TOML)
-│   │       ├── scraper.rs      ← IpoScraper trait + static registry
-│   │       └── scrapers/
-│   │           ├── chittorgarh.rs
-│   │           └── test_fixtures/    ← saved HTML snapshots for tests
-│   │               ├── chittorgarh-ipos.html
-│   │               └── chittorgarh-subscriptions.html
-│   └── mosaic-test-fixtures/  ← dev-only crate with test helpers (FakeFs etc.)
+│   │       └── scraper.rs      ← IpoScraper trait (no impls)
+│   ├── mosaic-scrapers/        ← scraper implementations
+│   │   ├── Cargo.toml
+│   │   └── src/
+│   │       ├── lib.rs          ← re-exports
+│   │       ├── chittorgarh.rs
+│   │       └── test_fixtures/  ← saved HTML snapshots for tests
+│   │           ├── chittorgarh-ipos.html
+│   │           └── chittorgarh-subscriptions.html
+│   └── mosaic-test-fixtures/   ← dev-only crate with test helpers (FakeFs etc.)
 ```
 
-- **`mosaic-core`** — shared types + SQLite + scrapers. Single source of truth for the data model. Scrapers use `reqwest::blocking` — synchronous API, no tokio dependency. `Market::format_amount(Decimal) -> String` provides currency-aware display formatting.
-- **`mosaic`** (root crate) — the GPUI desktop app reads from SQLite via `mosaic-core`, renders the four v1 screens. Also contains `mosaic-cli` binary for headless debug/automation.
-- **`mosaic-ingest`** — deleted. Its role is split between `mosaic-cli` (same scraper library) and the GUI's built-in background scraper.
+- **`mosaic-core`** — shared types, SQLite (via `rusqlite`), config, and the `IpoScraper` trait. Pure data-model layer. No HTTP or HTML deps.
+- **`mosaic-scrapers`** — concrete `IpoScraper` implementations (Chittorgarh, bhavcopy, etc.). Uses `reqwest::blocking`, `scraper`, `csv`. Depends on `mosaic-core` for types and the trait.
+- **`mosaic`** (root crate) — the GPUI desktop app reads from SQLite via `mosaic-core`, renders the four v1 screens, and drives scrapers via `mosaic-scrapers` in a background task. Also contains `mosaic-cli` binary for headless debug/automation.
 
 ### Dependencies (pinned versions)
 
@@ -380,18 +390,18 @@ mosaic/                        ← workspace root + root package
 | `jiff`                            | 0.2.31   | mosaic-core   | Date/time                           | Features: `serde`, `tz-system`. **Not `chrono`** — chrono soft-deprecated by its author as of 2026; jiff is the recommended successor with better timezone handling and faster parsing.                                                                                                                                                                                    |
 | `rust_decimal`                    | 1.42.1   | mosaic-core   | Financial arithmetic                | Feature: `serde`. Avoids float precision errors in prices/valuations.                                                                                                                                                                                                                                                                                                       |
 | `serde` + `serde_json`            | 1.0.228  | mosaic-core   | Serialization                       | `serde` feature: `derive`. For JSON parsing from yfinance-rs / exchange APIs.                                                                                                                                                                                                                                                                                               |
-| `reqwest`                         | 0.13.4   | mosaic-core   | HTTP client                         | Features: `blocking`, `rustls`, `json`. Uses `reqwest::blocking` — synchronous API, no tokio needed in the library. GUI wraps it in `background_executor.spawn()`.                                                                                                                                                                                                          |
-| `scraper`                         | 0.27.0   | mosaic-core   | HTML parsing (CSS selectors)        | For Chittorgarh tables etc.                                                                                                                                                                                                                                                                                                                                                 |
-| `csv`                             | 1.4.0    | mosaic-core   | CSV parsing                         | For bhavcopy files.                                                                                                                                                                                                                                                                                                                                                         |
-| `clap`                            | 4.6.1    | mosaic        | CLI argument parsing                | Feature: `derive`. Used by the `mosaic-cli` binary for subcommands.                                                                                                                                                                                                                                                                                                         |
 | `thiserror`                       | 2.0.18   | mosaic-core   | Derive `Error`                      | For `mosaic-core` error types.                                                                                                                                                                                                                                                                                                                                              |
-| `anyhow`                          | 1.0.103  | mosaic        | Flexible error type                 | For the `mosaic-cli` binary and GUI error handling (binaries use anyhow, libraries use thiserror).                                                                                                                                                                                                                                                                           |
-| `log`                             | 0.4.33   | mosaic-core   | Logging facade                      | GPUI uses `log` internally. Scrapers and DB code log via `log::info!`, `log::warn!`, `log::error!`.                                                                                                                                                                                                          |
-| `env_logger`                      | 0.11.11  | mosaic        | Log output                          | Initialized in `main()`. Reads `RUST_LOG` env var for level filtering.                                                                                                                                                                                                                                       |
+| `log`                             | 0.4.33   | both core     | Logging facade                      | GPUI uses `log` internally. Scrapers and DB code log via `log::info!`, `log::warn!`, `log::error!`.                                                                                                                                                                                                          |
 | `toml`                            | 1.1.2    | mosaic-core   | Config deserialization              | Parses `~/.config/mosaic/config.toml` into `Config` struct. v1.1 includes TOML 1.1 spec support.                                                                                                                                                                                                            |
 | `rust-embed`                      | 8.11.0   | mosaic-core   | Embed default config in binary      | Bundles `settings/default.toml` into the compiled binary. Used by the `AssetSource` implementation.                                                                                                                                                                                                         |
 | `dirs`                            | 6.0.0    | mosaic-core   | XDG directory paths                 | Resolves `~/.local/share/mosaic/` (data), `~/.config/mosaic/` (config), `~/.cache/mosaic/` (cache).                                                                                                                                                                                                        |
-| `yfinance-rs` _(v1.1+)_           | —        | mosaic-core   | Post-listing price history fallback | Async Rust client mirroring Python's `yfinance`; supports `.NS`/`.BO` tickers. Only useful once a company has a listed ticker. Deferred to v1.1.                                                                                                                                                                                                                             |
+| `reqwest`                         | 0.13.4   | mosaic-scrapers | HTTP client                       | Features: `blocking`, `rustls`, `json`. Uses `reqwest::blocking` — synchronous API, no tokio needed in the library. GUI wraps it in `background_executor.spawn()`.                                                                                                                                                                                                          |
+| `scraper`                         | 0.27.0   | mosaic-scrapers | HTML parsing (CSS selectors)      | For Chittorgarh tables etc.                                                                                                                                                                                                                                                                                                                                                 |
+| `csv`                             | 1.4.0    | mosaic-scrapers | CSV parsing                       | For bhavcopy files.                                                                                                                                                                                                                                                                                                                                                         |
+| `clap`                            | 4.6.1    | mosaic        | CLI argument parsing                | Feature: `derive`. Used by the `mosaic-cli` binary for subcommands.                                                                                                                                                                                                                                                                                                         |
+| `anyhow`                          | 1.0.103  | mosaic        | Flexible error type                 | For the `mosaic-cli` binary and GUI error handling (binaries use anyhow, libraries use thiserror).                                                                                                                                                                                                                                                                           |
+| `env_logger`                      | 0.11.11  | mosaic        | Log output                          | Initialized in `main()`. Reads `RUST_LOG` env var for level filtering.                                                                                                                                                                                                                                       |
+| `yfinance-rs` _(v1.1+)_           | —        | mosaic-scrapers | Post-listing price history       | Async Rust client mirroring Python's `yfinance`; supports `.NS`/`.BO` tickers. Only useful once a company has a listed ticker. Deferred to v1.1.                                                                                                                                                                                                                             |
 
 ### Things to verify before/early in implementation
 
@@ -433,7 +443,7 @@ Two tiers of state:
 | **User preferences** | Theme, refresh interval, default market | `~/.config/mosaic/config.toml` | TOML, `serde::Deserialize` |
 | **App runtime state** | Window bounds, panel sizes, sidebar collapsed | SQLite `key_value_store` table | JSON values keyed by string |
 
-**Config loading** (`mosaic-core/src/config.rs`):
+**Config loading** (`crates/mosaic-core/src/config.rs`):
 
 ```rust
 #[derive(Debug, Deserialize)]
@@ -555,14 +565,15 @@ Three tiers:
 
 **Unit tests** (`mosaic-core`):
 - `MosaicDb` with in-memory `:memory:` SQLite — fast, isolated, no I/O
-- Scraper tests against saved HTML fixtures in `crates/mosaic-core/src/scrapers/test_fixtures/`
+- Scraper tests against saved HTML fixtures in `crates/mosaic-scrapers/src/test_fixtures/`
 
 ```rust
+// In mosaic-scrapers
 #[cfg(test)]
 mod tests {
     #[test]
     fn test_parse_ipo_list() {
-        let html = include_str!("scrapers/test_fixtures/chittorgarh-ipos.html");
+        let html = include_str!("test_fixtures/chittorgarh-ipos.html");
         let ipos = parse_ipo_list(html).unwrap();
         assert_eq!(ipos.len(), 15);
         assert_eq!(ipos[0].name, "Hexaware Technologies");
@@ -630,7 +641,7 @@ trait IpoScraper {
 }
 ```
 
-The trait is synchronous (`reqwest::blocking`). No tokio needed in the library. Scrapers are registered in a static `Vec<Box<dyn IpoScraper>>` in `mosaic-core`. Both the GUI app and `mosaic-cli` call the same library — the GUI wraps it in `background_executor.spawn()`, the CLI calls it directly.
+The trait is synchronous (`reqwest::blocking`). No tokio needed in the library. The trait lives in `mosaic-core`, implementations live in `mosaic-scrapers`. Both the GUI app and `mosaic-cli` depend on `mosaic-scrapers` and call through the trait — the GUI wraps it in `background_executor.spawn()`, the CLI calls it directly.
 
 **Expansion path:**
 
@@ -638,7 +649,7 @@ The trait is synchronous (`reqwest::blocking`). No tokio needed in the library. 
 |---|---|---|---|
 | Schema | `markets`, `ipos` with `market_id`, normalized `subscription_snapshots`, `exchange_rates` (empty stub) | Add market-specific categories to `markets` table | Add `securities` parent table; `ipos` references it |
 | Core types | `Ipo`, `SubscriptionEntry`, `Market`, `PricePoint` with `Market::format_amount()` | Categories extend naturally | Add `Security` type, `Ipo` inherits |
-| Ingest | `ChittorgarhScraper` in `mosaic-core` library. Called from GUI bg task or `mosaic-cli`. Synchronous API. | New scraper struct implementing same trait | May add non-IPO scraper trait |
+| Ingest | `ChittorgarhScraper` in `mosaic-scrapers` crate. Called from GUI bg task or `mosaic-cli`. Synchronous API. | New scraper struct in same crate | May add non-IPO scraper trait |
 | UI | 4 sidebar items, India-focused. Background sync with status indicator. Click to force-refresh. | Market filter in IPO list | Generalized nav items |
 | Comparisons | Query methods on `MosaicDb` (sector, size) | Cross-market needs exchange rate table | Works on `security_id` instead of `ipo_id` |
 
@@ -762,7 +773,7 @@ fn start_background_sync(&mut self, cx: &mut Context<Self>) {
                 let db_path = db_path.clone();
                 async move {
                     let db = MosaicDb::open_writer(&db_path)?;
-                    let scraper = ChittorgarhScraper::new();
+                    let scraper = mosaic_scrapers::ChittorgarhScraper::new();
                     let ipos = scraper.fetch_ipos()?;
                     db.upsert_ipos(&ipos)?;
                     Ok::<_, anyhow::Error>(())
@@ -794,11 +805,12 @@ fn start_background_sync(&mut self, cx: &mut Context<Self>) {
 
 ### Files affected
 
-| File | Change |
-|---|---|
-| `crates/mosaic-core/src/db.rs` | Add `open_reader()` / `open_writer()`, add `path()` accessor |
-| `src/app.rs` | Add `_sync_task`, `is_syncing`, `last_sync_at`, `last_sync_err`, `start_background_sync()`, `refresh_from_db()` |
-| `src/sidebar.rs` or `src/sync_status.rs` | Sync status indicator component |
+| File | Crate | Change |
+|---|---|---|
+| `crates/mosaic-core/src/db.rs` | mosaic-core | Add `open_reader()` / `open_writer()`, add `path()` accessor |
+| `crates/mosaic-scrapers/src/lib.rs` | mosaic-scrapers | Export `ChittorgarhScraper` |
+| `src/app.rs` | mosaic | Add `_sync_task`, `is_syncing`, `last_sync_at`, `last_sync_err`, `start_background_sync()`, `refresh_from_db()` |
+| `src/sidebar.rs` or `src/sync_status.rs` | mosaic | Sync status indicator component |
 
 ### No additional runtime dependencies
 

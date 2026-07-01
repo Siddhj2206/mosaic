@@ -1,0 +1,12 @@
+[package]
+name = "mosaic-scrapers"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+csv = "1.4.0"
+log = "0.4.33"
+mosaic-core = { version = "0.1.0", path = "../mosaic-core" }
+reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "rustls", "json"] }
+scraper = "0.27.0"
+thiserror = "2.0.18"
