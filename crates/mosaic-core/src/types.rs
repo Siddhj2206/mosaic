@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use rust_decimal::Decimal;
 use serde::{Deserialize, Serialize};
 
@@ -33,6 +35,14 @@ impl IpoStatus {
             "withdrawn" => Some(IpoStatus::Withdrawn),
             _ => None,
         }
+    }
+}
+
+impl FromStr for IpoStatus {
+    type Err = String;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        IpoStatus::from_str(s).ok_or_else(|| format!("invalid IPO status: {s}"))
     }
 }
 

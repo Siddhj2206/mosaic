@@ -1,3 +1,6 @@
+pub mod crud;
+pub mod types_sql;
+
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 
@@ -112,14 +115,23 @@ impl MosaicDb {
     pub fn open(path: impl AsRef<Path>) -> Result<Self, rusqlite::Error> {
         let path = path.as_ref().to_path_buf();
 
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent).ok();
+        if path.to_str() != Some(":memory:") {
+            if let Some(parent) = path.parent() {
+                std::fs::create_dir_all(parent).ok();
+            }
         }
 
-        let writer = Connection::open(&path)?;
+        let path_str = path.to_string_lossy();
+        let uri = if path_str == ":memory:" {
+            "file::memory:?cache=shared".to_string()
+        } else {
+            path_str.to_string()
+        };
+
+        let writer = Connection::open(&uri)?;
         writer.execute_batch("PRAGMA journal_mode=WAL; PRAGMA busy_timeout=5000; PRAGMA synchronous=NORMAL;")?;
 
-        let reader = Connection::open(&path)?;
+        let reader = Connection::open(&uri)?;
         reader.execute_batch("PRAGMA journal_mode=WAL; PRAGMA query_only=1;")?;
 
         let mut db = MosaicDb {
