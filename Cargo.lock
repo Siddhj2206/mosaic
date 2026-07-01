@@ -3978,10 +3978,13 @@ name = "mosaic-scrapers"
 version = "0.1.0"
 dependencies = [
  "csv",
+ "jiff",
  "log",
  "mosaic-core",
  "reqwest",
+ "rust_decimal",
  "scraper",
+ "serde_json",
  "thiserror 2.0.18",
 ]
 
