@@ -4,9 +4,9 @@
 Mosaic is a deterministic IPO tracker built in Rust. Local desktop app with SQLite. No AI slop — all data traceable to sourced records with `ingested_at` timestamps. v1 targets India only (NSE/BSE mainboard IPOs).
 
 ## Workspace structure
-- `mosaic-core/` — shared types, DB, config, scraper trait (no HTTP deps)
-- `mosaic-scrapers/` — scraper implementations (reqwest::blocking, scraper, csv)
-- Root crate `mosaic/` — two `[[bin]]` entries: `mosaic` (GPUI GUI) + `mosaic-cli` (clap CLI)
+- `crates/mosaic-core/` — shared types, DB, config, scraper trait (no HTTP deps)
+- `crates/mosaic-scrapers/` — scraper implementations (reqwest::blocking, scraper, csv)
+- Root crate `mosaic/` — single `[[bin]]`: `mosaic` (GPUI GUI)
 
 ## Constraints & conventions
 
@@ -44,6 +44,20 @@ Mosaic is a deterministic IPO tracker built in Rust. Local desktop app with SQLi
 - Scraper tests parse saved HTML fixtures from `mosaic-scrapers/src/test_fixtures/` via `include_str!`
 - Real HTTP tests excluded from `cargo test` — run via `cargo test -- --ignored`
 
+## Agent skills
+
+### Issue tracker
+
+Work lives as GitHub issues on Siddhj2206/mosaic; use the `gh` CLI. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Default vocabulary: `needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: one `CONTEXT.md` + `docs/adr/` at the repo root. See `docs/agents/domain.md`.
+
 ## Skills to load
 | Skill | When |
 |-------|------|
@@ -53,9 +67,10 @@ Mosaic is a deterministic IPO tracker built in Rust. Local desktop app with SQLi
 | `cli-guidelines` | Reviewing CLI flag/arg design, help text, exit codes |
 
 ## Research reference
-When unsure about infra/code design patterns, spawn a subagent to explore the Zed codebase at `/var/home/sid/Documents/Projects/mosaic/../scratch/zed/` (or the actual path) for reference patterns in:
+When unsure about infra/code design patterns, spawn a subagent to explore the Zed codebase at `Reference/zed/` (local clone, inside the workspace — never build it, only read) for reference patterns in:
 - DB migrations (`Domain::MIGRATIONS` pattern)
 - Setting management (GPUI globals for settings)
 - Asset loading (`AssetSource` trait)
 - Testing (`FakeFs`, `TestAppContext`, `#[gpui::test]`)
 - Workspace configuration (profiles, `[workspace.dependencies]`)
+- UI styling tokens (themes, typography, spacing) — see `assets/themes/one-dark.json`
