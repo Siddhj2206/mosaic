@@ -95,4 +95,7 @@ CREATE TABLE key_value_store (
     key   TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
-"#];
+"#,
+    // Migration 2: Chittorgarh detail-page URL for enrichment re-runs.
+    r#"ALTER TABLE ipos ADD COLUMN detail_url TEXT;"#,
+];

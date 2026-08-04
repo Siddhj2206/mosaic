@@ -78,9 +78,10 @@ fn map_ipo(row: &Row) -> rusqlite::Result<Ipo> {
         listing_date_tentative: row.get::<_, i64>(23)? != 0,
         drhp_url: row.get(24)?,
         rhp_url: row.get(25)?,
-        source: row.get(26)?,
-        ingested_at: parse_dt_col(row, 27)?,
-        updated_at: parse_dt_col(row, 28)?,
+        detail_url: row.get(26)?,
+        source: row.get(27)?,
+        ingested_at: parse_dt_col(row, 28)?,
+        updated_at: parse_dt_col(row, 29)?,
     })
 }
 
@@ -334,8 +335,8 @@ impl Conn {
                            ofs_shares = ?16, issue_type = ?17, offer_type = ?18, open_date = ?19,
                            close_date = ?20, allotment_date = ?21, listing_date = ?22,
                            listing_date_tentative = ?23, drhp_url = ?24, rhp_url = ?25,
-                           source = ?26, updated_at = ?27
-                         WHERE id = ?28",
+                           detail_url = ?26, source = ?27, updated_at = ?28
+                         WHERE id = ?29",
                         params![
                             ipo.company_name,
                             ipo.normalized_name,
@@ -362,6 +363,7 @@ impl Conn {
                             ipo.listing_date_tentative as i64,
                             ipo.drhp_url,
                             ipo.rhp_url,
+                            ipo.detail_url,
                             ipo.source,
                             updated_at.to_string(),
                             id,
@@ -375,10 +377,10 @@ impl Conn {
                          face_value, lot_size, lot_multiples, issue_size_cr, shares_offered, \
                          fresh_issue_shares, ofs_shares, issue_type, offer_type, open_date, \
                          close_date, allotment_date, listing_date, listing_date_tentative, \
-                         drhp_url, rhp_url, source, ingested_at, updated_at) \
+                         drhp_url, rhp_url, detail_url, source, ingested_at, updated_at) \
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13, ?14, \
                                  ?15, ?16, ?17, ?18, ?19, ?20, ?21, ?22, ?23, ?24, ?25, ?26, \
-                                 ?27, ?28)",
+                                 ?27, ?28, ?29)",
                         params![
                             ipo.company_name,
                             ipo.normalized_name,
@@ -405,6 +407,7 @@ impl Conn {
                             ipo.listing_date_tentative as i64,
                             ipo.drhp_url,
                             ipo.rhp_url,
+                            ipo.detail_url,
                             ipo.source,
                             ipo.ingested_at.to_string(),
                             updated_at.to_string(),

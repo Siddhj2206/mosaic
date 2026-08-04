@@ -162,6 +162,8 @@ pub struct Ipo {
     pub listing_date_tentative: bool,
     pub drhp_url: Option<String>,
     pub rhp_url: Option<String>,
+    /// Chittorgarh detail-page URL (for enrichment re-runs and the dossier).
+    pub detail_url: Option<String>,
     /// Which scraper wrote this row: "nse" | "chittorgarh" | "ipowatch".
     pub source: String,
     pub ingested_at: DateTime,
@@ -200,6 +202,7 @@ impl Ipo {
             listing_date_tentative: false,
             drhp_url: None,
             rhp_url: None,
+            detail_url: None,
             source: source.into(),
             ingested_at: now,
             updated_at: now,

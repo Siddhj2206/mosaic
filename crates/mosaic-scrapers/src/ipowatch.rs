@@ -11,7 +11,7 @@ use jiff::civil::Date;
 use reqwest::blocking::Client;
 use scraper::{Html, Selector};
 
-use mosaic_core::{Error, Ipo, RateLimiter, Result};
+use mosaic_core::{Error, Ipo, IpoScraper, RateLimiter, Result};
 
 use crate::parse_util::{parse_band, parse_period, parse_rupees};
 
@@ -181,5 +181,31 @@ mod tests {
         // as Closed until NSE/Chittorgarh detail provides the listing date.
         let manipal = ipos.iter().find(|i| i.normalized_name == "manipal health").unwrap();
         assert_eq!(manipal.status, mosaic_core::IpoStatus::Closed);
+    }
+}
+
+// ---------------------------------------------------------------------------
+// IpoScraper impl
+// ---------------------------------------------------------------------------
+
+impl IpoScraper for IpoWatchScraper {
+    fn source(&self) -> &'static str {
+        "ipowatch"
+    }
+
+    /// Fetch the recent/upcoming mainboard archive as IPO records.
+    fn fetch_ipos(&mut self, today: Date) -> Result<Vec<Ipo>> {
+        let rows = self.fetch_archive()?;
+        Ok(rows_to_ipos(&rows, today))
+    }
+
+    /// IPO Watch serves no subscription data.
+    fn fetch_subscriptions(&mut self, _ipo: &Ipo) -> Result<Vec<mosaic_core::SubscriptionSnapshot>> {
+        Ok(Vec::new())
+    }
+
+    /// EOD history comes from NSE.
+    fn fetch_price_history(&mut self, _ipo: &Ipo) -> Result<Vec<mosaic_core::PricePoint>> {
+        Ok(Vec::new())
     }
 }

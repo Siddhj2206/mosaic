@@ -11,7 +11,11 @@ use std::time::Duration;
 use reqwest::blocking::Client;
 use scraper::{Html, Selector};
 
-use mosaic_core::{Error, Ipo, RateLimiter, Result};
+use rust_decimal::prelude::FromPrimitive;
+
+use mosaic_core::{
+    Error, Ipo, IpoScraper, IpoStatus, RateLimiter, Result, SubCategory, SubscriptionSnapshot,
+};
 
 use crate::parse_util::{parse_band, parse_day_month_year, parse_int, parse_month_day, parse_period, parse_rupees};
 
@@ -45,6 +49,11 @@ pub struct ChittorgarhDetail {
     pub fresh_issue_shares: Option<i64>,
     pub ofs_shares: Option<i64>,
     pub shares_offered: Option<i64>,
+    /// NSE symbol, embedded in the page JSON as `symbol":"MANIPALHOS"`.
+    pub symbol: Option<String>,
+    /// Final-day subscription rows from the detail page (QIB/NII/Retail/Total).
+    /// `ipo_id`/`snapshot_at` are filled by the caller.
+    pub final_subscription: Vec<mosaic_core::SubscriptionSnapshot>,
 }
 
 pub struct ChittorgarhScraper {
@@ -173,10 +182,45 @@ pub fn parse_detail(html: &str) -> Result<ChittorgarhDetail> {
         match header.as_str() {
             "IPO Date" => parse_key_facts(&rows, &mut detail),
             "Total Issue Size" => parse_issue_split(&rows, &mut detail),
+            "Category" if rows[0].get(1).is_some_and(|c| c.contains("Subscription")) => {
+                detail.final_subscription = parse_subscription_table(&rows);
+            }
             _ => {}
         }
     }
+
+    // NSE symbol is embedded in the page payload: "symbol":"MANIPALHOS"
+    if detail.symbol.is_none() {
+        if let Some(cap) = extract_embedded_symbol(html) {
+            detail.symbol = Some(cap);
+        }
+    }
     Ok(detail)
+}
+
+/// Hand-rolled extraction of the NSE symbol embedded in the page payload:
+/// `symbol":"MANIPALHOS"` (with optional backslash escapes).
+fn extract_embedded_symbol(haystack: &str) -> Option<String> {
+    let mut search_from = 0;
+    while let Some(idx) = haystack[search_from..].find("symbol") {
+        let start = search_from + idx;
+        let rest = &haystack[start + 6..];
+        if let Some(colon) = rest.find(':') {
+            let after = rest[colon + 1..].trim_start_matches(|c| c == '"' || c == '\\');
+            let token: String = after
+                .chars()
+                .take_while(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
+                .collect();
+            if token.len() >= 2 {
+                return Some(token);
+            }
+        }
+        search_from = start + 6;
+        if search_from >= haystack.len() {
+            break;
+        }
+    }
+    None
 }
 
 fn parse_key_facts(rows: &[Vec<String>], detail: &mut ChittorgarhDetail) {
@@ -231,6 +275,27 @@ fn parse_issue_split(rows: &[Vec<String>], detail: &mut ChittorgarhDetail) {
     }
 }
 
+/// Parse the detail page's final subscription table into snapshot rows.
+/// Category mapping: "QIB (Ex Anchor)" → qib, "NII" → nii, "Retail" → retail,
+/// "Total" → total; bNII/sNII/Employee rows are skipped (no NSE equivalent).
+fn parse_subscription_table(rows: &[Vec<String>]) -> Vec<SubscriptionSnapshot> {
+    let mut out = Vec::new();
+    for row in rows.iter().skip(1) {
+        if row.len() < 4 {
+            continue;
+        }
+        let Some(category) = SubCategory::parse(&row[0]) else {
+            continue;
+        };
+        let mut snapshot = SubscriptionSnapshot::new(0, jiff::civil::Date::ZERO, category, "chittorgarh");
+        snapshot.times_subscribed = row[1].trim().parse::<f64>().ok().and_then(rust_decimal::Decimal::from_f64);
+        snapshot.offered_shares = crate::parse_util::parse_int(&row[2]);
+        snapshot.bid_shares = crate::parse_util::parse_int(&row[3]);
+        out.push(snapshot);
+    }
+    out
+}
+
 /// Parse a period string using today's date for year defaults.
 fn parse_period_now_fallback(s: &str) -> Option<(jiff::civil::Date, jiff::civil::Date)> {
     let today = jiff::Timestamp::now()
@@ -260,6 +325,31 @@ mod tests {
     }
 
     #[test]
+    fn detail_extracts_symbol_and_final_subscription() {
+        let html = include_str!("test_fixtures/chittorgarh-detail-manipal.html");
+        let detail = parse_detail(html).unwrap();
+        assert_eq!(detail.symbol.as_deref(), Some("MANIPALHOS"));
+        // QIB (Ex Anchor), NII, Retail, Total mapped; bNII/sNII/Employee skipped.
+        let cats: Vec<_> = detail.final_subscription.iter().map(|s| s.category).collect();
+        assert_eq!(
+            cats,
+            vec![
+                SubCategory::Qib,
+                SubCategory::Nii,
+                SubCategory::Retail,
+                SubCategory::Total,
+            ]
+        );
+        let total = detail
+            .final_subscription
+            .iter()
+            .find(|s| s.category == SubCategory::Total)
+            .unwrap();
+        assert_eq!(total.times_subscribed, Some(rust_decimal::Decimal::from_str_exact("5.12").unwrap()));
+        assert_eq!(total.offered_shares, Some(86604947));
+    }
+
+    #[test]
     fn detail_parses_key_facts_and_split() {
         let html = include_str!("test_fixtures/chittorgarh-detail-manipal.html");
         let detail = parse_detail(html).unwrap();
@@ -279,4 +369,88 @@ mod tests {
         assert_eq!(detail.fresh_issue_shares, Some(135619881));
         assert_eq!(detail.ofs_shares, Some(21613834));
     }
+}
+
+// ---------------------------------------------------------------------------
+// IpoScraper impl
+// ---------------------------------------------------------------------------
+
+impl IpoScraper for ChittorgarhScraper {
+    fn source(&self) -> &'static str {
+        "chittorgarh"
+    }
+
+    /// Fetch the dashboard calendar, enrich each entry via its detail page,
+    /// and return IPO records (current window; ~15 rows).
+    fn fetch_ipos(&mut self, today: jiff::civil::Date) -> Result<Vec<Ipo>> {
+        let entries = self.fetch_dashboard()?;
+        let mut out = Vec::new();
+        for entry in entries {
+            let Some(url) = &entry.detail_url else {
+                continue;
+            };
+            let full_url = if url.starts_with("http") {
+                url.clone()
+            } else {
+                format!("{BASE_URL}{url}")
+            };
+            match self.fetch_detail(&full_url) {
+                Ok(detail) => out.push(detail_to_ipo(&detail, &full_url, today)),
+                Err(e) => log::warn!("chittorgarh detail {full_url}: {e}"),
+            }
+        }
+        Ok(out)
+    }
+
+    /// Final-day subscription from the detail page (for closed IPOs NSE no
+    /// longer serves). `snapshot_at` = close date, or today when unknown.
+    fn fetch_subscriptions(&mut self, ipo: &Ipo) -> Result<Vec<SubscriptionSnapshot>> {
+        let Some(url) = &ipo.detail_url else {
+            return Ok(Vec::new());
+        };
+        let detail = self.fetch_detail(url)?;
+        let snapshot_at = ipo.close_date.unwrap_or_else(|| {
+            jiff::Timestamp::now().to_zoned(jiff::tz::TimeZone::system()).date()
+        });
+        let mut out = Vec::new();
+        for mut s in detail.final_subscription {
+            s.ipo_id = ipo.id;
+            s.snapshot_at = snapshot_at;
+            out.push(s);
+        }
+        Ok(out)
+    }
+
+    /// EOD history comes from NSE; Chittorgarh serves none.
+    fn fetch_price_history(&mut self, _ipo: &Ipo) -> Result<Vec<mosaic_core::PricePoint>> {
+        Ok(Vec::new())
+    }
+}
+
+/// Convert a parsed detail page into an IPO record.
+pub fn detail_to_ipo(detail: &ChittorgarhDetail, detail_url: &str, today: jiff::civil::Date) -> Ipo {
+    let mut ipo = Ipo::new(&detail.company, "chittorgarh");
+    ipo.detail_url = Some(detail_url.to_string());
+    ipo.symbol = detail.symbol.clone();
+    ipo.exchange = detail.listing_at.clone();
+    ipo.open_date = detail.open_date;
+    ipo.close_date = detail.close_date;
+    ipo.listing_date = detail.listing_date;
+    ipo.listing_date_tentative = detail.listing_date_tentative;
+    ipo.price_band_low = detail.price_band_low;
+    ipo.price_band_high = detail.price_band_high;
+    ipo.final_price = detail.final_price;
+    ipo.face_value = detail.face_value;
+    ipo.lot_size = detail.lot_size;
+    ipo.offer_type = detail.offer_type.clone();
+    ipo.issue_type = detail.issue_type.clone();
+    ipo.shares_offered = detail.shares_offered;
+    ipo.fresh_issue_shares = detail.fresh_issue_shares;
+    ipo.ofs_shares = detail.ofs_shares;
+    if ipo.listing_date.is_some() {
+        ipo.status = IpoStatus::Listed;
+    } else {
+        ipo.derive_status(today);
+    }
+    ipo
 }
