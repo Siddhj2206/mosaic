@@ -3956,6 +3956,8 @@ dependencies = [
  "log",
  "mosaic-core",
  "mosaic-scrapers",
+ "open",
+ "rust_decimal",
 ]
 
 [[package]]

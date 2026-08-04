@@ -25,3 +25,12 @@ gpui-component = "0.5.1"
 log = "0.4.33"
 mosaic-core = { version = "0.1.0", path = "crates/mosaic-core" }
 mosaic-scrapers = { version = "0.1.0", path = "crates/mosaic-scrapers" }
+open = "5.3.6"
+rust_decimal = "1.42.1"
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

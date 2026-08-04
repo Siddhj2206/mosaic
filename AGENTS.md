@@ -33,6 +33,12 @@ Mosaic is a deterministic IPO tracker built in Rust. Local desktop app with SQLi
 - Entity model: `struct View; impl Render for View { ... }`; create via `cx.new(|cx| View::new(cx))`
 - Fire-and-forget pattern: `cx.spawn(...).detach()` with `log::error!` on failure in the update callback
 
+### Building & system deps
+- The GUI (`mosaic` binary) depends on GPUI, which requires system devel packages (mesa, libxkbcommon, etc.). Use the `devbox` toolbox (Fedora 44) for building: `toolbox enter devbox`, install missing deps with `dnf install`, then run `cargo build` from there.
+- Required packages: `mesa-libGL-devel`, `libxkbcommon-devel`, `mold`, `clang`, `dbus-devel`, `fontconfig-devel`.
+- The project uses `mold` as the linker (`.cargo/config.toml`).
+- Running the compiled GUI binary can be done on the base image directly — devbox is only needed for compilation.
+
 ### Testing
 - DB tests use temp files + atomic counter (not `:memory:`) to avoid parallel-test conflicts
 - Scraper tests parse saved HTML fixtures from `mosaic-scrapers/src/test_fixtures/` via `include_str!`
