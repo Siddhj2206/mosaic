@@ -1,0 +1,15 @@
+[package]
+name = "mosaic-scrapers"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+csv = "1.4.0"
+jiff = "0.2.35"
+log = "0.4.33"
+mosaic-core = { version = "0.1.0", path = "../mosaic-core" }
+reqwest = { version = "0.13.4", default-features = false, features = ["blocking", "rustls", "json", "cookies", "gzip"] }
+rust_decimal = "1.42.1"
+scraper = "0.27.0"
+serde_json = "1.0.151"
