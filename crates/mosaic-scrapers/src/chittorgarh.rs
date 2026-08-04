@@ -202,6 +202,9 @@ pub fn parse_detail(html: &str) -> Result<ChittorgarhDetail> {
 /// `symbol":"MANIPALHOS"` (with optional backslash escapes).
 fn extract_embedded_symbol(haystack: &str) -> Option<String> {
     let mut search_from = 0;
+    // NSE tickers contain at least one letter and are 3+ chars; skip stray
+    // numeric fields like `symbol":"100"`.
+    let mut best: Option<String> = None;
     while let Some(idx) = haystack[search_from..].find("symbol") {
         let start = search_from + idx;
         let rest = &haystack[start + 6..];
@@ -211,8 +214,15 @@ fn extract_embedded_symbol(haystack: &str) -> Option<String> {
                 .chars()
                 .take_while(|c| c.is_ascii_uppercase() || c.is_ascii_digit())
                 .collect();
-            if token.len() >= 2 {
-                return Some(token);
+            if token.len() >= 3 && token.chars().any(|c| c.is_ascii_alphabetic()) {
+                if best.is_none() {
+                    best = Some(token.clone());
+                }
+                // Prefer tokens that look like long-form NSE symbols
+                // (>= 6 chars, e.g. MANIPALHOS) over short codes.
+                if token.len() >= 6 {
+                    return Some(token);
+                }
             }
         }
         search_from = start + 6;
@@ -220,7 +230,7 @@ fn extract_embedded_symbol(haystack: &str) -> Option<String> {
             break;
         }
     }
-    None
+    best
 }
 
 fn parse_key_facts(rows: &[Vec<String>], detail: &mut ChittorgarhDetail) {
