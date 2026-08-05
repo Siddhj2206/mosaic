@@ -67,6 +67,22 @@ impl Db {
             conn.pragma_update(None, "user_version", MIGRATIONS.len() as i64)?;
             conn.execute_batch("COMMIT")?;
         }
+
+        // Schema guard: a database at our version must actually match our
+        // schema. This catches DBs created by unrelated code that happens to
+        // share a user_version number (e.g. the pre-rewrite mosaic).
+        let has_normalized = conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('ipos') WHERE name = 'normalized_name'",
+            [],
+            |row| row.get::<_, i64>(0),
+        )?;
+        if has_normalized == 0 {
+            return Err(Error::Migration(
+                "database schema does not match this binary (missing ipos.normalized_name). \
+                 If this is a pre-rewrite mosaic database, move the file aside and re-run."
+                    .to_string(),
+            ));
+        }
         Ok(())
     }
 
@@ -98,7 +114,7 @@ mod tests {
 
     #[test]
     fn migrations_apply_and_are_idempotent() {
-        let dir = std::env::temp_dir().join(format!("mosaic-db-test-{}", std::process::id()));
+        let dir = std::env::temp_dir().join(format!("mosaic-db-mig-test-{}", std::process::id()));
         let path = dir.join("test.db");
         let _ = std::fs::remove_dir_all(&dir);
 

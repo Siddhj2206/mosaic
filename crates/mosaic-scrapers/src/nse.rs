@@ -13,7 +13,7 @@ use rust_decimal::Decimal;
 use rust_decimal::prelude::FromPrimitive;
 use serde_json::Value;
 
-use mosaic_core::{Error, Ipo, IpoScraper, IpoStatus, PricePoint, RateLimiter, Result, SubCategory, SubscriptionSnapshot};
+use mosaic_core::{Error, Ipo, IpoScraper, PricePoint, RateLimiter, Result, SubCategory, SubscriptionSnapshot};
 
 use crate::parse_util::{parse_band, parse_day_month_year, parse_err, parse_int, parse_lot, parse_period};
 
@@ -334,6 +334,7 @@ fn num(row: &Value, key: &str) -> Option<Decimal> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use mosaic_core::IpoStatus;
 
     const TODAY: Date = Date::constant(2026, 8, 5);
 
@@ -415,5 +416,54 @@ mod tests {
     #[test]
     fn nse_date_format() {
         assert_eq!(fmt_nse_date(Date::constant(2026, 8, 4)), "04-08-2026");
+    }
+}
+
+// ---------------------------------------------------------------------------
+// Live HTTP tests (excluded from `cargo test`; run with -- --ignored)
+// ---------------------------------------------------------------------------
+
+#[cfg(test)]
+mod live_tests {
+    use super::*;
+
+    #[test]
+    #[ignore]
+    fn live_calendar_and_detail() {
+        let mut scraper = NseScraper::new().unwrap();
+        let today = jiff::Timestamp::now().to_zoned(jiff::tz::TimeZone::system()).date();
+        let ipos = scraper.fetch_ipos(today).unwrap();
+        assert!(!ipos.is_empty(), "expected at least one calendar row");
+        let ipo = &ipos[0];
+        assert!(ipo.symbol.is_some());
+        assert!(ipo.company_name.len() > 3);
+        println!("calendar: {} rows; first: {} ({})", ipos.len(), ipo.company_name, ipo.symbol.as_deref().unwrap_or("-"));
+    }
+
+    #[test]
+    #[ignore]
+    fn live_subscription_poll() {
+        let mut scraper = NseScraper::new().unwrap();
+        let mut ipo = Ipo::new("Ardee Industries Limited", "nse");
+        ipo.symbol = Some("ARDEE".into());
+        ipo.id = Some(1);
+        let rows = scraper.fetch_subscriptions(&ipo).unwrap();
+        // Day-1 windows may only expose Total; at least the header must be skipped.
+        assert!(rows.iter().all(|r| r.category != SubCategory::Total || r.times_subscribed.is_some()));
+        println!("subscription rows: {:?}", rows.iter().map(|r| (r.category.as_str(), r.times_subscribed)).collect::<Vec<_>>());
+    }
+
+    #[test]
+    #[ignore]
+    fn live_eod_history() {
+        let mut scraper = NseScraper::new().unwrap();
+        let mut ipo = Ipo::new("Reliance Industries", "nse");
+        ipo.symbol = Some("RELIANCE".into());
+        ipo.id = Some(1);
+        ipo.listing_date = Some(jiff::civil::Date::constant(2026, 7, 1));
+        let points = scraper.fetch_price_history(&ipo).unwrap();
+        assert!(!points.is_empty());
+        assert!(points[0].close_price.is_some());
+        println!("eod rows: {}; last close: {:?}", points.len(), points.last().and_then(|p| p.close_price));
     }
 }
