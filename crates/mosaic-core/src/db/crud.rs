@@ -12,7 +12,6 @@ use crate::error::{Error, Result};
 use crate::types::{
     IngestionRun, Ipo, IpoStatus, PricePoint, RunStatus, SubscriptionSnapshot,
 };
-use crate::Db;
 
 /// A connection to the mosaic database. Reads take `&self`; writes take
 /// `&mut self` (rusqlite's `Connection` requires `&mut` for writes anyway).
@@ -578,6 +577,7 @@ impl Conn {
 mod tests {
     use super::*;
     use crate::types::{Ipo, PricePoint, SubCategory, SubscriptionSnapshot, now_utc};
+    use crate::Db;
 
     static COUNTER: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
 
