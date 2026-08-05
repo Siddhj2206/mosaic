@@ -35,7 +35,7 @@ Mosaic is a deterministic IPO tracker built in Rust. Local desktop app with SQLi
 
 ### Building & system deps
 - The GUI (`mosaic` binary) depends on GPUI, which requires system devel packages (mesa, libxkbcommon, etc.). Use the `devbox` toolbox (Fedora 44) for building: `toolbox enter devbox`, install missing deps with `dnf install`, then run `cargo build` from there.
-- Required packages: `mesa-libGL-devel`, `libxkbcommon-devel`, `mold`, `clang`, `dbus-devel`, `fontconfig-devel`.
+- Required packages: `mesa-libGL-devel`, `libxkbcommon-devel`, `libxkbcommon-x11-devel`, `libxcb-devel`, `mold`, `clang`, `dbus-devel`, `fontconfig-devel`, `pkgconf-pkg-config`.
 - The project uses `mold` as the linker (`.cargo/config.toml`).
 - Running the compiled GUI binary can be done on the base image directly — devbox is only needed for compilation.
 
